@@ -1,0 +1,51 @@
+# BambuPanel Configuration
+# Copy this file to config.yaml and fill in your printer's details.
+# Find these values on the printer's touchscreen under Network > LAN Mode,
+# or in Bambu Studio / Bambu Handy app.
+
+# Local IP address of your printer (recommend setting a static DHCP lease)
+printer_ip: "192.168.1.XXX"
+
+# LAN Access Code shown on the printer touchscreen
+access_code: "XXXXXXXX"
+
+# Printer serial number (shown on touchscreen, Studio, or Handy app)
+serial: "XXXXXXXXXXXXXXXXX"
+
+# Menu visibility — set to false to hide any item from the dropdown
+show:
+  # Temperatures submenu
+  nozzle_temp:    true   # Nozzle actual + target
+  bed_temp:       true   # Bed actual + target
+  chamber_temp:   false  # Chamber temperature (enclosed printers only)
+
+  # Print Job submenu
+  job_state:      true   # Current gcode state
+  job_file:       true   # File / subtask name
+  job_progress:   true   # Completion percentage
+  job_remaining:  true   # Time remaining
+  job_layers:     true   # Current / total layers
+  job_speed:      true   # Speed level and magnitude
+
+  # AMS Filament submenu (per-slot)
+  ams_type:       true   # Filament type (PLA, PETG, etc.)
+  ams_brand:      true   # Sub-brand (PLA Basic, etc.)
+  ams_color:      true   # Color hex + RGB
+  ams_remain:     true   # Estimated remaining %
+
+  # Hardware submenu
+  wifi_signal:    true   # Wi-Fi signal strength
+  sdcard:         true   # SD card present
+  chamber_light:  true   # Chamber light mode
+  nozzle_info:    true   # Nozzle diameter and type
+  fan_heatbreak:  true   # Heatbreak fan speed
+  fan_cooling:    true   # Cooling fan speed
+  fan_aux:        true   # Auxiliary fan speed
+
+# Home Assistant integration (optional)
+# Used for the External Power Toggle in the dropdown menu.
+# Leave this section commented out (or remove it) to disable the toggle.
+#
+# ha_url:    "http://homeassistant.local:8123"    # HA base URL (no trailing slash)
+# ha_token:  "YOUR_LONG_LIVED_ACCESS_TOKEN"       # Settings → Profile → Long-Lived Access Tokens
+# ha_switch: "switch.entity_id"                   # Entity ID of the smart plug switch

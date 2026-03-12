@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=BambuPanel
+Comment=Bambu Lab Printer Status Indicator for the GNOME Panel
+Exec=/usr/bin/python3 /home/YOUR_USER/BambuPanel/bambupanel.py
+Icon=/home/YOUR_USER/BambuPanel/icons/ready.png
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
