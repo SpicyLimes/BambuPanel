@@ -352,9 +352,10 @@ class BambuPanel:
         # Optional Home Assistant client
         ha_url    = self.cfg.get("ha_url")
         ha_token  = self.cfg.get("ha_token")
-        ha_switch = self.cfg.get("ha_switch")
-        if ha_url and ha_token and ha_switch and ha_token != "YOUR_LONG_LIVED_ACCESS_TOKEN":
-            self.ha = HAClient(ha_url, ha_token, ha_switch)
+        ha_switch1 = self.cfg.get("ha_switch1")
+        ha_switch2 = self.cfg.get("ha_switch2")
+        if ha_url and ha_token and ha_switch1 and ha_switch2 and ha_token != "YOUR_LONG_LIVED_ACCESS_TOKEN":
+            self.ha = HAClient(ha_url, ha_token, ha_switch1, ha_switch2)
         else:
             self.ha = None
 
