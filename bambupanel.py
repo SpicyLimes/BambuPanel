@@ -97,10 +97,11 @@ SPEED_LEVELS = {1: "Silent", 2: "Standard", 3: "Sport", 4: "Ludicrous"}
 class HAClient:
     """Minimal HA REST API client for reading/toggling a switch entity."""
 
-    def __init__(self, base_url: str, token: str, entity_id: str):
+    def __init__(self, base_url: str, token: str, entity_id: str, entity_id2: str = None):
         self.base_url   = base_url.rstrip("/")
         self.token      = token
         self.entity_id  = entity_id
+        self.entity_id2 = entity_id2
 
     def _request(self, method: str, path: str, body: bytes = None):
         url = f"{self.base_url}{path}"
@@ -110,19 +111,21 @@ class HAClient:
         with urllib.request.urlopen(req, timeout=5) as resp:
             return json.loads(resp.read().decode())
 
-    def get_state(self) -> str | None:
+    def get_state(self, entity_id: str = None) -> str | None:
         """Return 'on', 'off', or None on error."""
+        eid = entity_id or self.entity_id
         try:
-            data = self._request("GET", f"/api/states/{self.entity_id}")
+            data = self._request("GET", f"/api/states/{eid}")
             return data.get("state")
         except Exception as e:
             print(f"[BambuPanel] HA get_state error: {e}")
             return None
 
-    def toggle(self):
+    def toggle(self, entity_id: str = None):
         """Toggle the switch via the HA service call API."""
+        eid = entity_id or self.entity_id
         try:
-            body = json.dumps({"entity_id": self.entity_id}).encode()
+            body = json.dumps({"entity_id": eid}).encode()
             self._request("POST", "/api/services/switch/toggle", body)
         except Exception as e:
             print(f"[BambuPanel] HA toggle error: {e}")
@@ -354,8 +357,8 @@ class BambuPanel:
         ha_token  = self.cfg.get("ha_token")
         ha_switch1 = self.cfg.get("ha_switch1")
         ha_switch2 = self.cfg.get("ha_switch2")
-        if ha_url and ha_token and ha_switch1 and ha_switch2 and ha_token != "YOUR_LONG_LIVED_ACCESS_TOKEN":
-            self.ha = HAClient(ha_url, ha_token, ha_switch1, ha_switch2)
+        if ha_url and ha_token and ha_switch1 and ha_token != "YOUR_LONG_LIVED_ACCESS_TOKEN":
+            self.ha = HAClient(ha_url, ha_token, ha_switch1, ha_switch2 or None)
         else:
             self.ha = None
 
@@ -477,10 +480,15 @@ class BambuPanel:
 
         # ── External Power Toggle (Home Assistant) ────────────────────────────
         self.m_power_toggle = None
+        self.m_power_toggle2 = None
         if self.ha:
-            self.m_power_toggle = Gtk.MenuItem(label="Power:  Checking…")
+            self.m_power_toggle = Gtk.MenuItem(label="⏻  Switch 1:  Checking…")
             self.m_power_toggle.connect("activate", self._on_power_toggle)
             menu.append(self.m_power_toggle)
+            if self.ha.entity_id2:
+                self.m_power_toggle2 = Gtk.MenuItem(label="⏻  Switch 2:  Checking…")
+                self.m_power_toggle2.connect("activate", self._on_power_toggle2)
+                menu.append(self.m_power_toggle2)
             menu.append(Gtk.SeparatorMenuItem())
 
         # ── Actions ───────────────────────────────────────────────────────────
@@ -591,29 +599,50 @@ class BambuPanel:
         if self.m_hw_fan_cool: self.m_hw_fan_cool.set_label(f"Fan (Cool):  {fan_pct(s.fan_cooling)}")
         if self.m_hw_fan_aux:  self.m_hw_fan_aux.set_label( f"Fan (Aux):   {fan_pct(s.fan_aux)}")
 
-        # External power toggle — refresh label in background to avoid blocking GTK
+        # External power toggle — refresh labels in background to avoid blocking GTK
         if self.m_power_toggle:
             threading.Thread(target=self._refresh_power_label, daemon=True).start()
+        if self.m_power_toggle2:
+            threading.Thread(target=self._refresh_power_label2, daemon=True).start()
 
     def _refresh_power_label(self):
-        state = self.ha.get_state()
+        state = self.ha.get_state(self.ha.entity_id)
         if state == "on":
-            label = "⏻  Power:  ON"
+            label = "⏻  Switch 1:  ON"
         elif state == "off":
-            label = "⏻  Power:  OFF"
+            label = "⏻  Switch 1:  OFF"
         else:
-            label = "⏻  Power:  Offline"
+            label = "⏻  Switch 1:  Offline"
         GLib.idle_add(self.m_power_toggle.set_label, label)
+
+    def _refresh_power_label2(self):
+        state = self.ha.get_state(self.ha.entity_id2)
+        if state == "on":
+            label = "⏻  Switch 2:  ON"
+        elif state == "off":
+            label = "⏻  Switch 2:  OFF"
+        else:
+            label = "⏻  Switch 2:  Offline"
+        GLib.idle_add(self.m_power_toggle2.set_label, label)
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
     def _on_power_toggle(self, _widget):
         if not self.ha:
             return
-        self.m_power_toggle.set_label("⏻  Power:  Toggling…")
+        self.m_power_toggle.set_label("⏻  Switch 1:  Toggling…")
         def _do_toggle():
-            self.ha.toggle()
+            self.ha.toggle(self.ha.entity_id)
             self._refresh_power_label()
+        threading.Thread(target=_do_toggle, daemon=True).start()
+
+    def _on_power_toggle2(self, _widget):
+        if not self.ha or not self.ha.entity_id2:
+            return
+        self.m_power_toggle2.set_label("⏻  Switch 2:  Toggling…")
+        def _do_toggle():
+            self.ha.toggle(self.ha.entity_id2)
+            self._refresh_power_label2()
         threading.Thread(target=_do_toggle, daemon=True).start()
 
     def _on_reload(self, _widget):
