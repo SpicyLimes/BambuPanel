@@ -19,6 +19,8 @@ import threading
 import time
 import os
 import sys
+import subprocess
+import webbrowser
 import yaml
 import urllib.request
 import paho.mqtt.client as mqtt
@@ -91,6 +93,95 @@ def fan_pct(raw: str) -> str:
         return raw or "—"
 
 SPEED_LEVELS = {1: "Silent", 2: "Standard", 3: "Sport", 4: "Ludicrous"}
+
+# ── BambuStats Dashboard Launcher ──────────────────────────────────────────────
+
+class DashboardLauncher:
+    """Runs the BambuStats web dashboard as a child process and opens it.
+
+    The dashboard lives at ``bambustats_dir`` (config key, defaulting to the
+    sibling ``../BambuStats`` directory). It is started on BambuPanel launch and
+    terminated on quit, so nothing is left running once the panel exits.
+    """
+
+    def __init__(self, cfg: dict):
+        default_dir = os.path.normpath(
+            os.path.join(SCRIPT_DIR, "..", "BambuStats"))
+        self.dir     = cfg.get("bambustats_dir") or default_dir
+        self.entry   = os.path.join(self.dir, "bambustats.py")
+        self.port    = int(cfg.get("bambustats_port", 8770))
+        self.url     = f"http://127.0.0.1:{self.port}/"
+        self._proc   = None
+
+    @property
+    def available(self) -> bool:
+        return os.path.isfile(self.entry)
+
+    def _is_running(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
+    def _server_responds(self) -> bool:
+        try:
+            urllib.request.urlopen(self.url, timeout=1)
+            return True
+        except Exception:
+            return False
+
+    def start(self):
+        """Launch the dashboard server if it isn't already running."""
+        if not self.available:
+            print(f"[BambuPanel] BambuStats not found at {self.entry} — "
+                  "dashboard disabled.")
+            return
+        if self._is_running():
+            return
+        try:
+            self._proc = subprocess.Popen(
+                [sys.executable, self.entry],
+                cwd=self.dir,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print(f"[BambuPanel] Started BambuStats dashboard (pid "
+                  f"{self._proc.pid}) — {self.url}")
+        except Exception as e:
+            print(f"[BambuPanel] Failed to start BambuStats: {e}")
+            self._proc = None
+
+    def open(self):
+        """Ensure the server is running, wait until it responds, then open it.
+
+        Runs on a daemon thread so the GTK main loop is never blocked.
+        """
+        threading.Thread(target=self._open_worker, daemon=True).start()
+
+    def _open_worker(self):
+        if not self.available:
+            print("[BambuPanel] Cannot open dashboard — BambuStats not found.")
+            return
+        if not self._server_responds():
+            self.start()
+            # Wait up to ~10s for the HTTP server to come up.
+            for _ in range(20):
+                if self._server_responds():
+                    break
+                time.sleep(0.5)
+        webbrowser.open(self.url)
+
+    def stop(self):
+        """Terminate the dashboard child process if we started it."""
+        if not self._is_running():
+            return
+        print("[BambuPanel] Stopping BambuStats dashboard...")
+        try:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+        except Exception as e:
+            print(f"[BambuPanel] Error stopping BambuStats: {e}")
+        self._proc = None
 
 # ── Home Assistant Client ─────────────────────────────────────────────────────
 
@@ -370,10 +461,15 @@ class BambuPanel:
         self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         self.indicator.set_label("  Off", "  Off")
 
+        # BambuStats web dashboard — launched as a child process
+        self.dashboard = DashboardLauncher(self.cfg)
+
         self._build_menu()
 
         self.mqtt = BambuMQTT(self.cfg, self.state, self._refresh)
         self.mqtt.start()
+
+        self.dashboard.start()
 
     # ── Menu build (runs once) ────────────────────────────────────────────────
 
@@ -492,6 +588,12 @@ class BambuPanel:
             menu.append(Gtk.SeparatorMenuItem())
 
         # ── Actions ───────────────────────────────────────────────────────────
+        if self.dashboard.available:
+            item_dashboard = Gtk.MenuItem(label="Open Dashboard")
+            item_dashboard.connect("activate", self._on_open_dashboard)
+            menu.append(item_dashboard)
+            menu.append(Gtk.SeparatorMenuItem())
+
         item_reload = Gtk.MenuItem(label="Reload BambuPanel")
         item_reload.connect("activate", self._on_reload)
         menu.append(item_reload)
@@ -645,6 +747,9 @@ class BambuPanel:
             self._refresh_power_label2()
         threading.Thread(target=_do_toggle, daemon=True).start()
 
+    def _on_open_dashboard(self, _widget):
+        self.dashboard.open()
+
     def _on_reload(self, _widget):
         print("[BambuPanel] Reloading...")
         self.mqtt.stop()
@@ -655,6 +760,7 @@ class BambuPanel:
 
     def _on_quit(self, _widget):
         print("[BambuPanel] Quitting.")
+        self.dashboard.stop()
         self.mqtt.stop()
         Gtk.main_quit()
 

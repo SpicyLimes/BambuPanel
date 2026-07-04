@@ -12,6 +12,15 @@ access_code: "XXXXXXXX"
 # Printer serial number (shown on touchscreen, Studio, or Handy app)
 serial: "XXXXXXXXXXXXXXXXX"
 
+# BambuStats web dashboard (optional)
+# When present, BambuPanel launches the dashboard on startup, adds an
+# "Open Dashboard" menu item, and stops it on quit.
+# bambustats_dir defaults to the sibling ../BambuStats directory; set it only
+# if BambuStats lives elsewhere. bambustats_port must match http_port in the
+# BambuStats config.yaml (default 8770).
+# bambustats_dir:  "/home/you/Documents/Projects/BambuStats"
+# bambustats_port: 8770
+
 # Menu visibility — set to false to hide any item from the dropdown
 show:
   # Temperatures submenu
