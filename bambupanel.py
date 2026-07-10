@@ -469,7 +469,10 @@ class BambuPanel:
         self.mqtt = BambuMQTT(self.cfg, self.state, self._refresh)
         self.mqtt.start()
 
-        self.dashboard.start()
+        # Auto-launch of the BambuStats dashboard is disabled — the dashboard now
+        # runs 24/7 on a separate local server. Uncomment to have BambuPanel start
+        # its own local copy on launch again.
+        # self.dashboard.start()
 
     # ── Menu build (runs once) ────────────────────────────────────────────────
 
@@ -588,11 +591,14 @@ class BambuPanel:
             menu.append(Gtk.SeparatorMenuItem())
 
         # ── Actions ───────────────────────────────────────────────────────────
-        if self.dashboard.available:
-            item_dashboard = Gtk.MenuItem(label="Open Dashboard")
-            item_dashboard.connect("activate", self._on_open_dashboard)
-            menu.append(item_dashboard)
-            menu.append(Gtk.SeparatorMenuItem())
+        # "Open Dashboard" is disabled — the dashboard now runs 24/7 on a separate
+        # local server rather than a BambuPanel-launched localhost copy. Uncomment
+        # to restore the tray shortcut (points at localhost:bambustats_port).
+        # if self.dashboard.available:
+        #     item_dashboard = Gtk.MenuItem(label="Open Dashboard")
+        #     item_dashboard.connect("activate", self._on_open_dashboard)
+        #     menu.append(item_dashboard)
+        #     menu.append(Gtk.SeparatorMenuItem())
 
         item_reload = Gtk.MenuItem(label="Reload BambuPanel")
         item_reload.connect("activate", self._on_reload)
@@ -747,8 +753,10 @@ class BambuPanel:
             self._refresh_power_label2()
         threading.Thread(target=_do_toggle, daemon=True).start()
 
-    def _on_open_dashboard(self, _widget):
-        self.dashboard.open()
+    # Disabled alongside the "Open Dashboard" menu item — the dashboard now runs
+    # 24/7 on a separate local server. Uncomment to restore the tray shortcut.
+    # def _on_open_dashboard(self, _widget):
+    #     self.dashboard.open()
 
     def _on_reload(self, _widget):
         print("[BambuPanel] Reloading...")

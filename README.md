@@ -94,6 +94,25 @@ ha_switch: "switch.your_plug_entity_id"
 If these keys are absent or the token is left as the placeholder, the toggle
 is silently hidden.
 
+## BambuStats Dashboard (Optional)
+
+BambuPanel ships with an integrated launcher for the companion
+[BambuStats](../BambuStats) web dashboard (`DashboardLauncher` in
+`bambupanel.py`). When enabled, it starts the dashboard as a child process on
+launch and adds an **Open Dashboard** item to the tray menu.
+
+**This integration is currently disabled.** The dashboard is intended to run
+24/7 on a separate local server so it stays available even when this PC is off,
+rather than as a BambuPanel-launched localhost copy. The launcher code is left
+in place (commented out) so it can be re-enabled:
+
+- `self.dashboard.start()` in `SysTrayApp.__init__` — auto-launch on startup
+- the **Open Dashboard** menu item block in `_build_menu`
+- the `_on_open_dashboard` handler
+
+Uncomment all three to restore the built-in localhost dashboard. Relevant config
+keys (`bambustats_dir`, `bambustats_port`) remain supported in `config.yaml`.
+
 ## Troubleshooting
 
 **Icon doesn't appear in panel:**
