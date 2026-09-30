@@ -12,15 +12,6 @@ access_code: "XXXXXXXX"
 # Printer serial number (shown on touchscreen, Studio, or Handy app)
 serial: "XXXXXXXXXXXXXXXXX"
 
-# BambuStats web dashboard (optional)
-# When present, BambuPanel launches the dashboard on startup, adds an
-# "Open Dashboard" menu item, and stops it on quit.
-# bambustats_dir defaults to the sibling ../BambuStats directory; set it only
-# if BambuStats lives elsewhere. bambustats_port must match http_port in the
-# BambuStats config.yaml (default 8770).
-# bambustats_dir:  "/home/you/Documents/Projects/BambuStats"
-# bambustats_port: 8770
-
 # Menu visibility — set to false to hide any item from the dropdown
 show:
   # Temperatures submenu
@@ -52,9 +43,11 @@ show:
   fan_aux:        true   # Auxiliary fan speed
 
 # Home Assistant integration (optional)
-# Used for the External Power Toggle in the dropdown menu.
-# Leave this section commented out (or remove it) to disable the toggle.
+# Adds up to two External Power Toggles to the dropdown menu.
+# Leave this section commented out (or remove it) to disable the toggles.
 #
-# ha_url:    "http://homeassistant.local:8123"    # HA base URL (no trailing slash)
-# ha_token:  "YOUR_LONG_LIVED_ACCESS_TOKEN"       # Settings → Profile → Long-Lived Access Tokens
-# ha_switch: "switch.entity_id"                   # Entity ID of the smart plug switch
+# ha_url:           "http://homeassistant.local:8123"  # HA base URL (no trailing slash)
+# ha_token:         "YOUR_LONG_LIVED_ACCESS_TOKEN"     # Profile → Security → Long-Lived Access Tokens
+# ha_switch1:       "switch.printer_plug"              # Entity ID of the first switch
+# ha_switch2:       "switch.second_plug"               # Optional second switch
+# ha_poll_interval: 30                                 # Seconds between switch reads (minimum 10)

@@ -25,6 +25,8 @@ import yaml
 import urllib.request
 import paho.mqtt.client as mqtt
 
+from ha_client import HAClient, HAStatus
+
 # ── Paths ────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR  = os.path.dirname(os.path.realpath(__file__))
@@ -182,44 +184,6 @@ class DashboardLauncher:
         except Exception as e:
             print(f"[BambuPanel] Error stopping BambuStats: {e}")
         self._proc = None
-
-# ── Home Assistant Client ─────────────────────────────────────────────────────
-
-class HAClient:
-    """Minimal HA REST API client for reading/toggling a switch entity."""
-
-    def __init__(self, base_url: str, token: str, entity_id: str, entity_id2: str = None):
-        self.base_url   = base_url.rstrip("/")
-        self.token      = token
-        self.entity_id  = entity_id
-        self.entity_id2 = entity_id2
-
-    def _request(self, method: str, path: str, body: bytes = None):
-        url = f"{self.base_url}{path}"
-        req = urllib.request.Request(url, data=body, method=method)
-        req.add_header("Authorization", f"Bearer {self.token}")
-        req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return json.loads(resp.read().decode())
-
-    def get_state(self, entity_id: str = None) -> str | None:
-        """Return 'on', 'off', or None on error."""
-        eid = entity_id or self.entity_id
-        try:
-            data = self._request("GET", f"/api/states/{eid}")
-            return data.get("state")
-        except Exception as e:
-            print(f"[BambuPanel] HA get_state error: {e}")
-            return None
-
-    def toggle(self, entity_id: str = None):
-        """Toggle the switch via the HA service call API."""
-        eid = entity_id or self.entity_id
-        try:
-            body = json.dumps({"entity_id": eid}).encode()
-            self._request("POST", "/api/services/switch/toggle", body)
-        except Exception as e:
-            print(f"[BambuPanel] HA toggle error: {e}")
 
 # ── Printer State ─────────────────────────────────────────────────────────────
 
@@ -443,13 +407,18 @@ class BambuPanel:
         self.cfg   = load_config()
         self.state = PrinterState()
 
-        # Optional Home Assistant client
-        ha_url    = self.cfg.get("ha_url")
-        ha_token  = self.cfg.get("ha_token")
-        ha_switch1 = self.cfg.get("ha_switch1")
-        ha_switch2 = self.cfg.get("ha_switch2")
-        if ha_url and ha_token and ha_switch1 and ha_token != "YOUR_LONG_LIVED_ACCESS_TOKEN":
-            self.ha = HAClient(ha_url, ha_token, ha_switch1, ha_switch2 or None)
+        # Optional Home Assistant power switches. HAClient (ha_client.py) sends one
+        # request at a time and stops after a 401/403, so a bad token can't get this
+        # machine's IP banned by Home Assistant.
+        ha_url   = self.cfg.get("ha_url")
+        ha_token = self.cfg.get("ha_token")
+        self.switches = [e for e in (self.cfg.get("ha_switch1"),
+                                     self.cfg.get("ha_switch2")) if e]
+        self.ha_poll_interval = max(10, int(self.cfg.get("ha_poll_interval", 30)))
+        self._stop_ha = threading.Event()
+        self._wake_ha = threading.Event()
+        if ha_url and ha_token and self.switches and ha_token != "YOUR_LONG_LIVED_ACCESS_TOKEN":
+            self.ha = HAClient(ha_url, ha_token)
         else:
             self.ha = None
 
@@ -468,6 +437,10 @@ class BambuPanel:
 
         self.mqtt = BambuMQTT(self.cfg, self.state, self._refresh)
         self.mqtt.start()
+
+        # Switch states are polled on their own timer, not on every MQTT update
+        if self.ha:
+            threading.Thread(target=self._ha_loop, daemon=True).start()
 
         # Auto-launch of the BambuStats dashboard is disabled — the dashboard now
         # runs 24/7 on a separate local server. Uncomment to have BambuPanel start
@@ -577,17 +550,19 @@ class BambuPanel:
 
         menu.append(Gtk.SeparatorMenuItem())
 
-        # ── External Power Toggle (Home Assistant) ────────────────────────────
-        self.m_power_toggle = None
-        self.m_power_toggle2 = None
+        # ── External Power Toggles (Home Assistant) ───────────────────────────
+        self.m_switches = []
+        self.m_ha_retry = None
         if self.ha:
-            self.m_power_toggle = Gtk.MenuItem(label="⏻  Switch 1:  Checking…")
-            self.m_power_toggle.connect("activate", self._on_power_toggle)
-            menu.append(self.m_power_toggle)
-            if self.ha.entity_id2:
-                self.m_power_toggle2 = Gtk.MenuItem(label="⏻  Switch 2:  Checking…")
-                self.m_power_toggle2.connect("activate", self._on_power_toggle2)
-                menu.append(self.m_power_toggle2)
+            for i, _entity in enumerate(self.switches):
+                item = Gtk.MenuItem(label=f"⏻  Switch {i + 1}:  Checking…")
+                item.connect("activate", self._on_power_toggle, i)
+                menu.append(item)
+                self.m_switches.append(item)
+            # Only shown while HA requests are paused after a 401/403
+            self.m_ha_retry = Gtk.MenuItem(label="Retry Home Assistant")
+            self.m_ha_retry.connect("activate", self._on_ha_retry)
+            menu.append(self.m_ha_retry)
             menu.append(Gtk.SeparatorMenuItem())
 
         # ── Actions ───────────────────────────────────────────────────────────
@@ -609,6 +584,8 @@ class BambuPanel:
         menu.append(item_quit)
 
         menu.show_all()
+        if self.m_ha_retry:
+            self.m_ha_retry.set_visible(False)
         self.indicator.set_menu(menu)
 
     # ── Refresh (runs on every MQTT update — updates labels only) ─────────────
@@ -707,51 +684,57 @@ class BambuPanel:
         if self.m_hw_fan_cool: self.m_hw_fan_cool.set_label(f"Fan (Cool):  {fan_pct(s.fan_cooling)}")
         if self.m_hw_fan_aux:  self.m_hw_fan_aux.set_label( f"Fan (Aux):   {fan_pct(s.fan_aux)}")
 
-        # External power toggle — refresh labels in background to avoid blocking GTK
-        if self.m_power_toggle:
-            threading.Thread(target=self._refresh_power_label, daemon=True).start()
-        if self.m_power_toggle2:
-            threading.Thread(target=self._refresh_power_label2, daemon=True).start()
+    # ── Home Assistant switches ───────────────────────────────────────────────
 
-    def _refresh_power_label(self):
-        state = self.ha.get_state(self.ha.entity_id)
-        if state == "on":
-            label = "⏻  Switch 1:  ON"
-        elif state == "off":
-            label = "⏻  Switch 1:  OFF"
-        else:
-            label = "⏻  Switch 1:  Offline"
-        GLib.idle_add(self.m_power_toggle.set_label, label)
+    def _ha_loop(self):
+        """Poll switch states every ha_poll_interval seconds (and right after a toggle).
 
-    def _refresh_power_label2(self):
-        state = self.ha.get_state(self.ha.entity_id2)
+        HAClient latches on 401/403, so a rejected token costs one failed request —
+        not one per poll — until the user clicks "Retry Home Assistant".
+        """
+        while not self._stop_ha.is_set():
+            for i, entity in enumerate(self.switches):
+                state = self.ha.get_state(entity)
+                GLib.idle_add(self._apply_switch, i, state)
+            GLib.idle_add(self._apply_ha_status)
+            self._wake_ha.wait(self.ha_poll_interval)
+            self._wake_ha.clear()
+
+    def _apply_switch(self, index: int, state):
         if state == "on":
-            label = "⏻  Switch 2:  ON"
+            value = "ON"
         elif state == "off":
-            label = "⏻  Switch 2:  OFF"
+            value = "OFF"
+        elif self.ha.status in (HAStatus.OK, HAStatus.UNKNOWN):
+            value = "Unavailable"      # HA answered, entity missing/unavailable
         else:
-            label = "⏻  Switch 2:  Offline"
-        GLib.idle_add(self.m_power_toggle2.set_label, label)
+            value = self.ha.status_text()
+        self.m_switches[index].set_label(f"⏻  Switch {index + 1}:  {value}")
+        return False
+
+    def _apply_ha_status(self):
+        if self.m_ha_retry:
+            self.m_ha_retry.set_visible(self.ha.blocked)
+        return False
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
-    def _on_power_toggle(self, _widget):
-        if not self.ha:
+    def _on_power_toggle(self, _widget, index: int):
+        if not self.ha or self.ha.blocked:
             return
-        self.m_power_toggle.set_label("⏻  Switch 1:  Toggling…")
+        self.m_switches[index].set_label(f"⏻  Switch {index + 1}:  Toggling…")
         def _do_toggle():
-            self.ha.toggle(self.ha.entity_id)
-            self._refresh_power_label()
+            self.ha.toggle(self.switches[index])
+            self._wake_ha.set()          # re-read switch states right away
         threading.Thread(target=_do_toggle, daemon=True).start()
 
-    def _on_power_toggle2(self, _widget):
-        if not self.ha or not self.ha.entity_id2:
-            return
-        self.m_power_toggle2.set_label("⏻  Switch 2:  Toggling…")
-        def _do_toggle():
-            self.ha.toggle(self.ha.entity_id2)
-            self._refresh_power_label2()
-        threading.Thread(target=_do_toggle, daemon=True).start()
+    def _on_ha_retry(self, _widget):
+        print("[BambuPanel] Retrying Home Assistant (one probe).")
+        self.ha.retry()
+        self.m_ha_retry.set_visible(False)
+        for i, item in enumerate(self.m_switches):
+            item.set_label(f"⏻  Switch {i + 1}:  Checking…")
+        self._wake_ha.set()
 
     # Disabled alongside the "Open Dashboard" menu item — the dashboard now runs
     # 24/7 on a separate local server. Uncomment to restore the tray shortcut.
@@ -765,11 +748,15 @@ class BambuPanel:
         self._refresh()
         self.mqtt = BambuMQTT(self.cfg, self.state, self._refresh)
         self.mqtt.start()
+        if self.ha:
+            self._on_ha_retry(None)
 
     def _on_quit(self, _widget):
         print("[BambuPanel] Quitting.")
         self.dashboard.stop()
         self.mqtt.stop()
+        self._stop_ha.set()
+        self._wake_ha.set()
         Gtk.main_quit()
 
     def run(self):

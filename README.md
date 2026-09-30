@@ -4,6 +4,12 @@ A lightweight Ubuntu GNOME top-panel indicator for monitoring a Bambu Lab
 3D printer over LAN (local network only, no cloud required). Optionally
 controls a smart plug via Home Assistant for external power toggling.
 
+> **Heads-up: printer connection limits.** Some Bambu Lab printers only allow a
+> few local connections at the same time. Your slicer, Home Assistant, dashboards
+> and BambuPanel each use one. If one of them suddenly can't connect, another is
+> probably using the last available connection — close something you aren't
+> using and try again.
+
 ## Panel Display
 
 | State       | Icon                    | Label                             |
@@ -78,40 +84,35 @@ Edit `~/.config/autostart/bambupanel.desktop` and update the `Exec=` and
 
 ## Home Assistant Power Toggle (Optional)
 
-To add a smart plug toggle to the dropdown menu, add these three keys to
+To add smart plug toggles to the dropdown menu, add these keys to
 `config.yaml`:
 
 ```yaml
-ha_url:    "http://<your-ha-ip>:8123"
-ha_token:  "your-long-lived-access-token"
-ha_switch: "switch.your_plug_entity_id"
+ha_url:     "http://<your-ha-ip>:8123"
+ha_token:   "your-long-lived-access-token"
+ha_switch1: "switch.your_plug_entity_id"
+ha_switch2: "switch.second_plug_entity_id"   # optional
+ha_poll_interval: 30                         # optional, seconds between switch reads
 ```
 
-- `ha_token`: create one in HA under **Settings → Profile → Security → Long-Lived Access Tokens**
-- `ha_switch`: the entity ID of your smart plug switch in Home Assistant
+- `ha_token`: create one in HA under **your profile → Security → Long-Lived Access Tokens**
+- `ha_switch1` / `ha_switch2`: entity IDs of your smart plug switches in Home Assistant
 - No extra pip packages required — uses Python's built-in `urllib`
+
+Switch states are read on their own timer (`ha_poll_interval`, default 30 s,
+minimum 10) and right after you toggle one.
+
+**Protection against Home Assistant's IP ban:** HA can ban an IP address
+after a few failed logins, and every app reaching HA from that address shares
+the counter. BambuPanel's HA client (`ha_client.py`) sends one
+request at a time, checks the token with a single `GET /api/` first, and on a
+`401` (token rejected) or `403` (IP banned) stops sending anything. The
+switches then show `HA token rejected` / `HA IP banned` and a **Retry Home
+Assistant** item appears; nothing more is sent until you click it or use
+**Reload BambuPanel**. A bad token costs one failed request, not one per poll.
 
 If these keys are absent or the token is left as the placeholder, the toggle
 is silently hidden.
-
-## BambuStats Dashboard (Optional)
-
-BambuPanel ships with an integrated launcher for the companion
-[BambuStats](../BambuStats) web dashboard (`DashboardLauncher` in
-`bambupanel.py`). When enabled, it starts the dashboard as a child process on
-launch and adds an **Open Dashboard** item to the tray menu.
-
-**This integration is currently disabled.** The dashboard is intended to run
-24/7 on a separate local server so it stays available even when this PC is off,
-rather than as a BambuPanel-launched localhost copy. The launcher code is left
-in place (commented out) so it can be re-enabled:
-
-- `self.dashboard.start()` in `SysTrayApp.__init__` — auto-launch on startup
-- the **Open Dashboard** menu item block in `_build_menu`
-- the `_on_open_dashboard` handler
-
-Uncomment all three to restore the built-in localhost dashboard. Relevant config
-keys (`bambustats_dir`, `bambustats_port`) remain supported in `config.yaml`.
 
 ## Troubleshooting
 
@@ -125,9 +126,25 @@ Install the AppIndicator GNOME extension (see step 2 above). Also confirm
 - Confirm access code and serial are correct in `config.yaml`
 - Check that your printer isn't in Cloud Mode (must be LAN Only)
 
-**Power toggle shows "unknown":**
+**Won't connect while the slicer is open (or the slicer can't connect while
+BambuPanel runs):**
+The printer may have run out of local connections — see the connection-limit
+note at the top of this page. Close one of the other apps and try again.
+
+**Switch shows "HA token rejected" or "HA IP banned":**
+Home Assistant refused the request (401 / 403) and BambuPanel has stopped
+contacting it.
+- *Token rejected:* create a new Long-Lived Access Token, put it in
+  `config.yaml`, then click **Retry Home Assistant**.
+- *IP banned:* this machine's address is on HA's ban list, usually from an app
+  that kept retrying a bad token. From a different device, remove the address
+  from `ip_bans.yaml` in HA's config directory (the *File editor* add-on works),
+  restart Home Assistant, fix the offending token, then click **Retry Home
+  Assistant**.
+
+**Switch shows "HA unreachable" or "Unavailable":**
 - Confirm `ha_url` is reachable from this machine (`curl http://<ha_ip>:8123/api/`)
-- Confirm the token is valid and the entity ID is correct
+- "Unavailable" means HA answered but the entity ID is wrong or unavailable
 
 **Label shows "Off" immediately:**
 The printer may be sleeping or powered down. The indicator will reconnect
@@ -138,6 +155,7 @@ automatically when the printer becomes reachable.
 ```
 BambuPanel/
 ├── bambupanel.py          # Main indicator script
+├── ha_client.py           # Home Assistant client with IP-ban protection
 ├── config.yaml            # Your printer config (git-ignored)
 ├── config.yaml.example    # Config template
 ├── requirements.txt       # Python dependencies
